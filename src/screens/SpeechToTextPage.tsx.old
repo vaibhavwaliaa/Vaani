@@ -1,0 +1,825 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  useColorScheme,
+  ScrollView,
+  PermissionsAndroid,
+  Platform,
+  Alert,
+  Switch,
+  Animated,
+  Dimensions,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Voice from '@react-native-voice/voice';
+import { Language } from '../components/LanguageSelector';
+import TextSimplifier from '../services/TextSimplifier';
+import { colors } from '../styles/colors';
+import { typography, spacing, borderRadius, shadows } from '../styles/theme';
+
+const { width } = Dimensions.get('window');
+
+interface SpeechToTextPageProps {
+  selectedLanguage?: Language;
+  onBack: () => void;
+}
+
+const SpeechToTextPage: React.FC<SpeechToTextPageProps> = ({
+  selectedLanguage,
+  onBack,
+}) => {
+  const isDarkMode = useColorScheme() === 'dark';
+  const [recognizedText, setRecognizedText] = useState('');
+  const [simplifiedText, setSimplifiedText] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [status, setStatus] = useState('Tap microphone to start');
+  const [simplifyEnabled, setSimplifyEnabled] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(false);
+  const [readabilityScore, setReadabilityScore] = useState(0);
+  
+  // Animations
+  const pulseAnim = new Animated.Value(1);
+  const waveAnim = new Animated.Value(0);
+
+  // Pulse animation for microphone when listening
+  useEffect(() => {
+    if (isListening) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.2,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+      
+      Animated.loop(
+        Animated.timing(waveAnim, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+      waveAnim.setValue(0);
+    }
+  }, [isListening]);
+
+  // Language code mapping for all Indian languages
+  const getLanguageCode = () => {
+    const languageMap: { [key: string]: string } = {
+      'Hindi': 'hi-IN',
+      'English': 'en-US',
+      'Bengali': 'bn-IN',
+      'Telugu': 'te-IN',
+      'Marathi': 'mr-IN',
+      'Tamil': 'ta-IN',
+      'Gujarati': 'gu-IN',
+      'Urdu': 'ur-PK',
+      'Kannada': 'kn-IN',
+      'Malayalam': 'ml-IN',
+      'Odia': 'or-IN',
+      'Punjabi': 'pa-IN',
+      'Assamese': 'as-IN',
+      'Nepali': 'ne-NP',
+      'Sanskrit': 'sa-IN'
+    };
+    return languageMap[selectedLanguage?.name || 'English'] || 'en-US';
+  };
+
+  useEffect(() => {
+    // Check if Voice module is available
+    console.log('🔍 Checking Voice module:', Voice);
+    if (!Voice) {
+      console.error('❌ Voice module is not available!');
+      Alert.alert('Error', 'Speech recognition module is not available. Please restart the app.');
+      return;
+    }
+
+    // Set up Voice event handlers
+    Voice.onSpeechStart = onSpeechStart;
+    Voice.onSpeechEnd = onSpeechEnd;
+    Voice.onSpeechResults = onSpeechResults;
+    Voice.onSpeechPartialResults = onSpeechPartialResults;
+    Voice.onSpeechError = onSpeechError;
+
+    console.log('✅ Voice event handlers set up');
+
+    return () => {
+      // Cleanup
+      console.log('🧹 Cleaning up Voice module');
+      Voice.destroy().then(Voice.removeAllListeners).catch(err => {
+        console.log('Cleanup error (can be ignored):', err);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Handle simplification toggle
+  useEffect(() => {
+    if (recognizedText) {
+      if (simplifyEnabled) {
+        const simplified = TextSimplifier.simplify(recognizedText, {
+          maxWordsPerSentence: 10,
+          removeComplexWords: true,
+          addEmojis: true,
+          expandAbbreviations: true,
+        });
+        setSimplifiedText(simplified);
+        const score = TextSimplifier.getReadabilityScore(simplified);
+        setReadabilityScore(score);
+      } else {
+        setSimplifiedText(recognizedText);
+        const score = TextSimplifier.getReadabilityScore(recognizedText);
+        setReadabilityScore(score);
+      }
+    }
+  }, [simplifyEnabled, recognizedText]);
+
+  const onSpeechStart = () => {
+    console.log('🎤 Speech recognition started');
+    setStatus('🎤 Listening... Speak now!');
+  };
+
+  const onSpeechEnd = () => {
+    console.log('🛑 Speech recognition ended');
+    setIsListening(false);
+    setStatus('✅ Recognition complete');
+  };
+
+  const onSpeechResults = (event: any) => {
+    console.log('✅ Final results:', event.value);
+    if (event.value && event.value.length > 0) {
+      // Get new speech text
+      const newText = event.value[0];
+      console.log('📝 New recognized text:', newText);
+      
+      // Update recognized text by appending
+      setRecognizedText(prevText => {
+        const fullText = prevText + (prevText ? ' ' : '') + newText;
+        console.log('📝 Full text:', fullText);
+        
+        // Apply text simplification if enabled
+        if (simplifyEnabled) {
+          const simplified = TextSimplifier.simplify(fullText, {
+            maxWordsPerSentence: 10,
+            removeComplexWords: true,
+            addEmojis: true,
+            expandAbbreviations: true,
+          });
+          console.log('✨ Simplified text:', simplified);
+          setSimplifiedText(simplified);
+          
+          // Calculate readability score
+          const score = TextSimplifier.getReadabilityScore(simplified);
+          setReadabilityScore(score);
+        } else {
+          setSimplifiedText(fullText);
+          const score = TextSimplifier.getReadabilityScore(fullText);
+          setReadabilityScore(score);
+        }
+        
+        return fullText;
+      });
+      
+      setStatus('✅ Speech recognized!');
+    }
+  };
+
+  const onSpeechPartialResults = (event: any) => {
+    console.log('⏱️ Partial results:', event.value);
+    if (event.value && event.value.length > 0) {
+      // Show real-time partial results
+      const partialText = event.value[0];
+      setStatus(`⏱️ Hearing: "${partialText}"`);
+    }
+  };
+
+  const onSpeechError = (event: any) => {
+    console.error('❌ Speech error:', event.error);
+    setIsListening(false);
+    
+    if (event.error?.message === 'No speech input' || event.error?.code === '7') {
+      setStatus('🔇 No speech detected. Tap to try again.');
+    } else {
+      setStatus('❌ Error occurred. Tap to try again.');
+    }
+  };
+
+  const requestMicrophonePermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission',
+            message: 'This app needs access to your microphone for speech recognition.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        return granted === PermissionsAndroid.RESULTS.GRANTED;
+      } catch (err) {
+        console.warn(err);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const startListening = async () => {
+    try {
+      console.log('🎙️ Starting speech recognition...');
+      
+      // Check if Voice module is available
+      if (!Voice || typeof Voice.start !== 'function') {
+        console.error('❌ Voice module or start method not available');
+        Alert.alert('Error', 'Speech recognition is not available. Please restart the app.');
+        return;
+      }
+
+      // Check permission
+      const hasPermission = await requestMicrophonePermission();
+      if (!hasPermission) {
+        Alert.alert('Permission Required', 'Microphone permission is required for speech recognition.');
+        return;
+      }
+
+      // Clear previous status
+      setStatus('🔄 Starting...');
+      setIsListening(true);
+
+      // Get language code based on user selection
+      const languageCode = getLanguageCode();
+      console.log(`🌍 Using language: ${selectedLanguage?.name} (${languageCode})`);
+
+      // Start voice recognition with selected language
+      console.log('📞 Calling Voice.start with:', languageCode);
+      await Voice.start(languageCode);
+      console.log('✅ Voice.start called successfully');
+
+    } catch (error: any) {
+      console.error('❌ Error starting speech recognition:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+      setIsListening(false);
+      setStatus('❌ Failed to start. Tap to try again.');
+      Alert.alert('Error', `Failed to start speech recognition: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const stopListening = async () => {
+    try {
+      setStatus('🛑 Stopping...');
+      await Voice.stop();
+      setIsListening(false);
+    } catch (error) {
+      console.error('❌ Error stopping speech recognition:', error);
+      setIsListening(false);
+      setStatus('Tap microphone to start');
+    }
+  };
+
+  const clearText = () => {
+    setRecognizedText('');
+    setSimplifiedText('');
+    setReadabilityScore(0);
+    setStatus('Tap microphone to start');
+  };
+
+  const theme = isDarkMode ? colors.dark : colors.light;
+
+  // Get status color based on listening state
+  const getStatusColor = () => {
+    if (isListening) return colors.semantic.listening;
+    if (status.includes('✅')) return colors.semantic.ready;
+    if (status.includes('🔄') || status.includes('⏱️')) return colors.semantic.processing;
+    return colors.semantic.ready;
+  };
+
+  const waveOpacity = waveAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0],
+  });
+
+  const waveScale = waveAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 2.5],
+  });
+
+  return (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
+      {/* Gradient Header */}
+      <View style={[styles.gradientHeader, { 
+        backgroundColor: isDarkMode 
+          ? 'rgba(37, 99, 235, 0.1)' 
+          : 'rgba(37, 99, 235, 0.05)' 
+      }]}>
+        <View style={styles.headerContent}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={onBack}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.backIcon, { color: colors.primary.main }]}>←</Text>
+          </TouchableOpacity>
+          <View style={styles.headerTextContainer}>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>
+              Live Captions
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: theme.subtext }]}>
+              {selectedLanguage ? selectedLanguage.name : 'English'}
+            </Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor() }]}>
+            <View style={styles.statusDot} />
+          </View>
+        </View>
+      </View>
+
+      <ScrollView 
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Language Card - Compact */}
+        {selectedLanguage && (
+          <View style={[styles.languageCard, { backgroundColor: theme.surface }, shadows.md]}>
+            <View style={styles.languageCardContent}>
+              <Text style={styles.languageEmoji}>{selectedLanguage.emoji}</Text>
+              <View style={styles.languageInfo}>
+                <Text style={[styles.languageCardName, { color: theme.text }]}>
+                  {selectedLanguage.name}
+                </Text>
+                <Text style={[styles.languageCardNative, { color: theme.subtext }]}>
+                  {selectedLanguage.nativeName}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Microphone Control - Hero Section */}
+        <View style={[styles.micSection, { backgroundColor: theme.surface }, shadows.lg]}>
+          <View style={styles.micContainer}>
+            {/* Wave animations */}
+            {isListening && (
+              <>
+                <Animated.View
+                  style={[
+                    styles.waveCircle,
+                    {
+                      opacity: waveOpacity,
+                      transform: [{ scale: waveScale }],
+                      borderColor: colors.semantic.listening,
+                    },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.waveCircle,
+                    styles.waveCircle2,
+                    {
+                      opacity: waveOpacity,
+                      transform: [{ scale: waveScale }],
+                      borderColor: colors.semantic.listening,
+                    },
+                  ]}
+                />
+              </>
+            )}
+            
+            {/* Microphone Button */}
+            <TouchableOpacity
+              style={[
+                styles.micButton,
+                { 
+                  backgroundColor: isListening 
+                    ? colors.semantic.listening 
+                    : colors.primary.main 
+                },
+                shadows.xl,
+              ]}
+              onPress={isListening ? stopListening : startListening}
+              activeOpacity={0.85}
+            >
+              <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                <Text style={styles.micIcon}>
+                  {isListening ? '⏸' : '🎤'}
+                </Text>
+              </Animated.View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Status Text */}
+          <View style={styles.statusContainer}>
+            <Text style={[styles.statusLabel, { color: theme.subtext }]}>Status</Text>
+            <Text style={[styles.statusText, { color: getStatusColor() }]}>
+              {status}
+            </Text>
+          </View>
+
+          {/* Action Button */}
+          <Text style={[styles.actionHint, { color: theme.subtext }]}>
+            {isListening ? 'Tap to stop recording' : 'Tap microphone to start'}
+          </Text>
+        </View>
+
+        {/* Controls Card */}
+        <View style={[styles.controlsCard, { backgroundColor: theme.surface }, shadows.md]}>
+          <Text style={[styles.controlsTitle, { color: theme.text }]}>
+            Accessibility Settings
+          </Text>
+          
+          {/* Easy Reading Toggle */}
+          <View style={styles.controlItem}>
+            <View style={styles.controlLeft}>
+              <View style={[styles.iconCircle, { backgroundColor: colors.secondary.light }]}>
+                <Text style={styles.controlIcon}>🧠</Text>
+              </View>
+              <View style={styles.controlTextContainer}>
+                <Text style={[styles.controlLabel, { color: theme.text }]}>
+                  Easy Reading Mode
+                </Text>
+                <Text style={[styles.controlSubtext, { color: theme.subtext }]}>
+                  Simplified for Deaf & low-literacy users
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={simplifyEnabled}
+              onValueChange={setSimplifyEnabled}
+              trackColor={{ false: theme.border, true: colors.secondary.main }}
+              thumbColor={colors.white}
+              ios_backgroundColor={theme.border}
+            />
+          </View>
+
+          {/* Show Original Toggle */}
+          {recognizedText.length > 0 && (
+            <View style={[styles.controlItem, styles.controlItemBorder, { borderTopColor: theme.border }]}>
+              <View style={styles.controlLeft}>
+                <View style={[styles.iconCircle, { backgroundColor: colors.accent.light }]}>
+                  <Text style={styles.controlIcon}>👁</Text>
+                </View>
+                <View style={styles.controlTextContainer}>
+                  <Text style={[styles.controlLabel, { color: theme.text }]}>
+                    Compare Versions
+                  </Text>
+                  <Text style={[styles.controlSubtext, { color: theme.subtext }]}>
+                    Show original & simplified
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={showOriginal}
+                onValueChange={setShowOriginal}
+                trackColor={{ false: theme.border, true: colors.accent.main }}
+                thumbColor={colors.white}
+                ios_backgroundColor={theme.border}
+              />
+            </View>
+          )}
+        </View>
+
+        {/* Captions Display */}
+        <View style={[styles.captionsCard, { backgroundColor: theme.surface }, shadows.lg]}>
+          <View style={styles.captionsHeader}>
+            <View style={styles.captionsTitleContainer}>
+              <Text style={[styles.captionsTitle, { color: theme.text }]}>
+                Live Captions
+              </Text>
+              {recognizedText.length > 0 && (
+                <View style={[styles.wordCount, { backgroundColor: colors.primary.light }]}>
+                  <Text style={[styles.wordCountText, { color: colors.primary.main }]}>
+                    {recognizedText.split(' ').length} words
+                  </Text>
+                </View>
+              )}
+            </View>
+            {recognizedText.length > 0 && (
+              <TouchableOpacity
+                style={[styles.clearButtonNew, { backgroundColor: colors.error.light }]}
+                onPress={clearText}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.clearButtonTextNew, { color: colors.error.main }]}>
+                  Clear
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Readability Badge */}
+          {recognizedText.length > 0 && (
+            <View style={[styles.readabilityBadge, { 
+              backgroundColor: readabilityScore >= 70 
+                ? colors.success.light 
+                : readabilityScore >= 50 
+                ? colors.warning.light 
+                : colors.error.light 
+            }]}>
+              <Text style={styles.badgeIcon}>📊</Text>
+              <View style={styles.badgeTextContainer}>
+                <Text style={[styles.badgeLabel, { 
+                  color: readabilityScore >= 70 
+                    ? colors.success.main 
+                    : readabilityScore >= 50 
+                    ? colors.warning.main 
+                    : colors.error.main 
+                }]}>
+                  {TextSimplifier.getReadingLevel(readabilityScore)}
+                </Text>
+                <Text style={[styles.badgeScore, { color: theme.subtext }]}>
+                  Score: {readabilityScore.toFixed(0)}/100
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Caption Text */}
+          <ScrollView 
+            style={styles.captionsScroll}
+            contentContainerStyle={styles.captionsScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {!recognizedText ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyIcon}>🎙️</Text>
+                <Text style={[styles.emptyTitle, { color: theme.text }]}>
+                  Ready to Listen
+                </Text>
+                <Text style={[styles.emptySubtitle, { color: theme.subtext }]}>
+                  Tap the microphone and start speaking{'\n'}
+                  Your speech will appear here with{'\n'}
+                  simplified captions for easy reading
+                </Text>
+                <View style={styles.featuresList}>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>✨</Text>
+                    <Text style={[styles.featureText, { color: theme.subtext }]}>
+                      Simple words & short sentences
+                    </Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>😊</Text>
+                    <Text style={[styles.featureText, { color: theme.subtext }]}>
+                      Helpful emojis for clarity
+                    </Text>
+                  </View>
+                  <View style={styles.featureItem}>
+                    <Text style={styles.featureIcon}>🌍</Text>
+                    <Text style={[styles.featureText, { color: theme.subtext }]}>
+                      15 Indian languages supported
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <View>
+                {!showOriginal ? (
+                  <Text style={[styles.captionText, { color: theme.text }]} selectable>
+                    {simplifiedText}
+                  </Text>
+                ) : (
+                  <View>
+                    <View style={styles.compareSection}>
+                      <Text style={[styles.compareLabel, { color: theme.subtext }]}>
+                        Original Text
+                      </Text>
+                      <Text style={[styles.captionText, styles.originalText, { color: theme.text }]} selectable>
+                        {recognizedText}
+                      </Text>
+                    </View>
+                    <View style={[styles.compareDivider, { backgroundColor: theme.border }]} />
+                    <View style={styles.compareSection}>
+                      <Text style={[styles.compareLabel, { color: colors.secondary.main }]}>
+                        ✨ Simplified Text
+                      </Text>
+                      <Text style={[styles.captionText, { color: theme.text }]} selectable>
+                        {simplifiedText}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+          </ScrollView>
+        </View>
+
+        {/* Footer Info */}
+        <View style={[styles.footerCard, { backgroundColor: colors.primary.light }]}>
+          <Text style={styles.footerIcon}>♿</Text>
+          <Text style={[styles.footerText, { color: colors.primary.main }]}>
+            Designed for Deaf & Hard-of-Hearing Users
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    padding: 20,
+  },
+  header: {
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    padding: 10,
+  },
+  backButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  languageInfoCard: {
+    padding: 20,
+    borderRadius: 15,
+    marginBottom: 20,
+  },
+  languageInfoLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  languageName: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  nativeLanguageName: {
+    fontSize: 16,
+    opacity: 0.7,
+  },
+  noLanguageText: {
+    fontSize: 16,
+    opacity: 0.7,
+    fontStyle: 'italic',
+  },
+  statusContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  statusIndicator: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  statusText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  microphoneContainer: {
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  microphoneButton: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+  },
+  microphoneIcon: {
+    fontSize: 40,
+  },
+  microphoneLabel: {
+    marginTop: 15,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  textDisplayCard: {
+    flex: 1,
+    padding: 20,
+    borderRadius: 15,
+    marginBottom: 15,
+  },
+  textDisplayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  textDisplayTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  clearButton: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  clearButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  textScrollView: {
+    flex: 1,
+  },
+  textScrollContent: {
+    flexGrow: 1,
+  },
+  recognizedText: {
+    fontSize: 18,
+    lineHeight: 28,
+  },
+  placeholderText: {
+    opacity: 0.5,
+    fontStyle: 'italic',
+  },
+  instructionsCard: {
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  instructionsText: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  instructionsSubText: {
+    fontSize: 12,
+    textAlign: 'center',
+    opacity: 0.7,
+  },
+  simplificationControls: {
+    marginBottom: 15,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  toggleLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 10,
+  },
+  readabilityCard: {
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 15,
+    alignItems: 'center',
+  },
+  readabilityLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 5,
+  },
+  readabilityScore: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 3,
+  },
+  readabilitySubtext: {
+    fontSize: 12,
+    opacity: 0.7,
+  },
+  originalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+    opacity: 0.8,
+  },
+});
+
+export default SpeechToTextPage;
